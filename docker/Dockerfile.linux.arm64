@@ -1,0 +1,28 @@
+# Step 1: Extract Veracode Java Wrapper from official image
+FROM veracode/api-wrapper-java:cmd as veracode-wrapper
+
+# Step 2: Base image for the plugin (ARM64 compatible)
+FROM alpine:3.20
+
+ENV GODEBUG netdns=go
+
+# Install Java and SSL certs
+RUN apk add --no-cache openjdk17 ca-certificates
+
+# Set working directory
+WORKDIR /home/luser
+
+# Create required .veracode folder
+RUN mkdir -p /home/luser/.veracode
+
+# Copy ARM64 plugin binary from release
+ADD release/linux/arm64/plugin /bin/plugin
+
+# Copy Veracode API Wrapper .jar
+COPY --from=veracode-wrapper /opt/veracode/api-wrapper.jar /opt/veracode/api-wrapper.jar
+
+# Make plugin executable
+RUN chmod +x /bin/plugin
+
+# Set entry point
+ENTRYPOINT ["/bin/plugin"]
