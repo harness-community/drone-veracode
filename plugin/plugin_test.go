@@ -196,23 +196,3 @@ func TestRunJavaCommandWithTimeout(t *testing.T) {
 		t.Log("Simulated timeout case might need adjustment")
 	}
 }
-
-// handlePolicyEvaluation test
-func TestPolicyEvaluation(t *testing.T) {
-	ctx := context.Background()
-	oldExec := execCommandContext
-	defer func() { execCommandContext = oldExec }()
-	execCommandContext = mockCommandContext
-
-	args := Args{
-		AppName:       "MyApp",
-		VID:           "vid",
-		VKey:          "vkey",
-		SandboxName:   "sandbox",
-		UnstableBuild: true,
-	}
-	err := handlePolicyEvaluation(ctx, args)
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}

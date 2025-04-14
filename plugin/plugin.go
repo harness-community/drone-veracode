@@ -3,14 +3,13 @@ package plugin
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/bmatcuk/doublestar/v4"
+	"github.com/georgeJobs/go-antpathmatcher"
 	"github.com/sirupsen/logrus"
 )
 
@@ -45,7 +44,6 @@ type Args struct {
 	DeleteIncompleteScan    bool   `envconfig:"PLUGIN_DELETE_INCOMPLETE_SCAN"`
 	WaitForScan             bool   `envconfig:"PLUGIN_WAIT_FOR_SCAN"`
 	TimeoutFailsJob         bool   `envconfig:"PLUGIN_TIMEOUT_FAILS_JOB"`
-	UnstableBuild           bool   `envconfig:"PLUGIN_UNSTABLE_BUILD"`
 	CanFailJob              bool   `envconfig:"PLUGIN_CAN_FAIL_JOB"`
 	UseProxy                bool   `envconfig:"PLUGIN_USE_PROXY"`
 	Version                 string `envconfig:"PLUGIN_VERSION"`
@@ -180,59 +178,74 @@ func resolveUploadFileList(includes, excludes string) (string, error) {
 		}
 	}
 
-	fsys := os.DirFS(workspace)
-
-	excludeSet, err := buildFullPathSet(fsys, workspace, excludes)
+	matches, err := getAntMatchedFiles(workspace, includes, excludes)
 	if err != nil {
-		return "", fmt.Errorf("resolving excludes: %w", err)
+		return "", fmt.Errorf("failed to match files: %w", err)
 	}
 
-	includeMatches, err := getMatchedFilesFromPatterns(fsys, includes)
-	if err != nil {
-		return "", fmt.Errorf("resolving includes: %w", err)
+	if len(matches) == 0 {
+		return "", fmt.Errorf("no files matched for upload")
 	}
 
-	var finalFiles []string
-	for _, f := range includeMatches {
-		full := filepath.Join(workspace, f)
-		if _, excluded := excludeSet[full]; !excluded {
-			finalFiles = append(finalFiles, full)
-		}
-	}
-
-	if len(finalFiles) == 0 {
-		return "", fmt.Errorf("no files matched for upload after includes/excludes filtering")
-	}
-
-	return strings.Join(finalFiles, ","), nil
+	return strings.Join(matches, ","), nil
 }
 
-func getMatchedFilesFromPatterns(fsys fs.FS, patterns string) ([]string, error) {
-	var allMatches []string
-	for _, pat := range strings.Split(patterns, ",") {
-		pat = strings.TrimSpace(pat)
-		if pat == "" {
-			continue
-		}
-		matches, err := doublestar.Glob(fsys, pat)
+func getAntMatchedFiles(root, includePatterns, excludePatterns string) ([]string, error) {
+	var results []string
+	includes := splitPatterns(includePatterns)
+	excludes := splitPatterns(excludePatterns)
+
+	matcher := antpathmatcher.NewAntPathMatcher()
+
+	err := filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil, fmt.Errorf("pattern %q error: %w", pat, err)
+			return err
 		}
-		allMatches = append(allMatches, matches...)
-	}
-	return allMatches, nil
+		if d.IsDir() {
+			return nil
+		}
+
+		// Get path relative to root for matching
+		relPath, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		relPath = filepath.ToSlash(relPath) // normalize for matcher
+
+		// Check inclusion
+		included := false
+		for _, pat := range includes {
+			if matcher.Match(pat, relPath) {
+				included = true
+				break
+			}
+		}
+		if !included {
+			return nil
+		}
+
+		// Check exclusion
+		for _, pat := range excludes {
+			if matcher.Match(pat, relPath) {
+				return nil
+			}
+		}
+
+		results = append(results, filepath.Join(root, relPath))
+		return nil
+	})
+
+	return results, err
 }
 
-func buildFullPathSet(fsys fs.FS, root, patterns string) (map[string]struct{}, error) {
-	set := make(map[string]struct{})
-	matches, err := getMatchedFilesFromPatterns(fsys, patterns)
-	if err != nil {
-		return nil, err
+func splitPatterns(patterns string) []string {
+	var result []string
+	for _, p := range strings.Split(patterns, ",") {
+		if trimmed := strings.TrimSpace(p); trimmed != "" {
+			result = append(result, trimmed)
+		}
 	}
-	for _, f := range matches {
-		set[filepath.Join(root, f)] = struct{}{}
-	}
-	return set, nil
+	return result
 }
 
 func handleResult(err error, args Args) error {
@@ -276,7 +289,7 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 
 			logrus.Info("✅ Scan completed and published!")
 
-			if args.UnstableBuild {
+			if args.CanFailJob {
 				if err := handlePolicyEvaluation(ctx, args); err != nil {
 					return err
 				}
@@ -309,7 +322,7 @@ func isScanPublished(ctx context.Context, args Args) (bool, error) {
 }
 
 func handlePolicyEvaluation(ctx context.Context, args Args) error {
-	logrus.Info("🔍 Evaluating policy compliance for unstableBuild...")
+	logrus.Info("🔍 Evaluating policy compliance for Failed job...")
 
 	policyArgs := []string{
 		"-jar", "/opt/veracode/api-wrapper.jar",
@@ -325,13 +338,11 @@ func handlePolicyEvaluation(ctx context.Context, args Args) error {
 	cmd := exec.CommandContext(ctx, "java", policyArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		logrus.Warnf("⚠️ Failed to check policy status: %v", err)
-		return nil // do not fail job on policy check failure
+		return fmt.Errorf("❌ Failed to check policy status: %v", err)
 	}
 
 	if strings.Contains(string(output), PolicyDidNotPass) || strings.Contains(string(output), PolicyConditionalPass) {
-		logrus.Warn("⚠️ Policy evaluation returned Did Not Pass / Conditional Pass. Marking build as UNSTABLE.")
-		os.Exit(2)
+		return fmt.Errorf("❌ Policy evaluation returned Did Not Pass / Conditional Pass. Marking build as Failed: %w", err)
 	}
 
 	logrus.Info("✅ Policy evaluation passed")
