@@ -1,19 +1,21 @@
-# Use Windows Server Core
+# Step 1: Extract Veracode API Wrapper JAR from official Veracode image
+FROM veracode/api-wrapper-java:cmd AS veracode-wrapper
+
+# Step 2: Base image for the plugin
 FROM mcr.microsoft.com/windows/servercore:ltsc2022
 
-# Run as Administrator
+# Use Administrator for permissions
 USER ContainerAdministrator
 
-# Create necessary directories
+ENV GODEBUG=netdns=go
+
+# Create required folder
 RUN mkdir C:\veracode
 
-# Download Veracode API Wrapper JAR (you can adjust the version accordingly)
-ADD https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip C:\veracode\pipeline-scan.zip
+# Copy Veracode API Wrapper JAR
+COPY --from=veracode-wrapper C:\opt\veracode\api-wrapper.jar C:\opt\veracode\api-wrapper.jar
 
-# Unzip the tool
-RUN powershell -Command "Expand-Archive -Path C:\\veracode\\pipeline-scan.zip -DestinationPath C:\\veracode"
-
-# Copy your plugin binary
+# Copy the plugin binary (Windows)
 ADD release/windows/amd64/plugin.exe C:\plugin.exe
 
 # Set working directory
