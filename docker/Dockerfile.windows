@@ -20,5 +20,4 @@ ADD release/windows/amd64/plugin.exe C:\\plugin.exe
 # Set working directory (to match your Linux logic)
 WORKDIR C:\\
 
-# Entrypoint
 ENTRYPOINT ["C:\\plugin.exe"]
