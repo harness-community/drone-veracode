@@ -5,8 +5,8 @@ FROM openjdk:17-jdk-windowsservercore-ltsc2022
 ENV GODEBUG=netdns=go
 
 # Create folders one-by-one (this avoids the error you hit)
-RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force" && `
-RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force" && `
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force"
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
 
 # Download and extract Veracode wrapper JAR (rename it to api-wrapper.jar)
