@@ -1,22 +1,24 @@
-# Use OpenJDK 17 on Windows base
+# Use OpenJDK 17 with Windows base
 FROM openjdk:17-jdk-windowsservercore-ltsc2022
 
-# Set environment variables
+# Set environment
 ENV GODEBUG=netdns=go
 
-# Create folders (note use of double quotes for PowerShell string handling)
-RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode', 'C:\\opt\\veracode', 'C:\\Users\\ContainerUser\\.veracode' -Force"
+# Create folders one-by-one (this avoids the error you hit)
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force" && `
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force" && `
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
 
-# Download Veracode pipeline-scan jar and rename it to api-wrapper.jar
+# Download and extract Veracode wrapper JAR (rename it to api-wrapper.jar)
 RUN powershell -Command "Invoke-WebRequest -Uri 'https://downloads.veracode.com/securityscan/pipeline-scan-LATEST.zip' -OutFile 'C:\\veracode\\wrapper.zip'; \
     Expand-Archive -Path 'C:\\veracode\\wrapper.zip' -DestinationPath 'C:\\veracode'; \
     Copy-Item 'C:\\veracode\\pipeline-scan.jar' -Destination 'C:\\opt\\veracode\\api-wrapper.jar'"
 
-# Copy your plugin binary (from local project directory)
+# Copy plugin binary
 ADD release/windows/amd64/plugin.exe C:\\plugin.exe
 
-# Set working directory
+# Set working directory (to match your Linux logic)
 WORKDIR C:\\
 
-# Entry point
+# Entrypoint
 ENTRYPOINT ["C:\\plugin.exe"]
