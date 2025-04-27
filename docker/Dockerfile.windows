@@ -1,27 +1,37 @@
-# Use OpenJDK 17 with Windows Server Core
+# Stage 1: Pull Windows Server Core base to copy required system DLLs
+FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS core
+
+# Stage 2: Main Veracode plugin image with OpenJDK installed
 FROM openjdk:17-jdk-windowsservercore-ltsc2022
 
-# Set environment variable
+# Switch to ContainerAdministrator (required for copying files and running install commands)
+USER ContainerAdministrator
+
+# Set Go DNS behavior for better network resolution inside Windows containers
 ENV GODEBUG=netdns=go
+
+# Copy important system DLL (needed for networking libraries)
+COPY --from=core /windows/system32/netapi32.dll /windows/system32/netapi32.dll
 
 # Create required directories
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
 
-# Step 1: Download the Veracode API wrapper zip using curl.exe
-RUN curl.exe -L "https://downloads.veracode.com/authentication/api-wrapper-java-LATEST.zip" -o "C:\\veracode\\api-wrapper.zip"
+# Download the Veracode API wrapper safely with forced TLS 1.2
+RUN powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://downloads.veracode.com/authentication/api-wrapper-java-LATEST.zip' -OutFile 'C:\\veracode\\api-wrapper.zip'"
 
-# Step 2: Expand the downloaded zip file
+# Expand the downloaded Veracode API wrapper zip
 RUN powershell -Command "Expand-Archive -Path 'C:\\veracode\\api-wrapper.zip' -DestinationPath 'C:\\veracode'"
 
-# Step 3: Copy and rename the jar to /opt/veracode/api-wrapper.jar
+# Move the Veracode Java API wrapper jar to correct final location
 RUN powershell -Command "Copy-Item -Path 'C:\\veracode\\VeracodeJavaAPI.jar' -Destination 'C:\\opt\\veracode\\api-wrapper.jar'"
 
-# Copy your plugin binary
-ADD release/windows/amd64/plugin.exe C:\\plugin.exe
+# Copy your plugin binary executable into container
+ADD release/windows/amd64/plugin.exe C:/plugin.exe
 
 # Set working directory
-WORKDIR C:\\
+WORKDIR C:/
 
+# Set plugin executable as entrypoint
 ENTRYPOINT ["C:\\plugin.exe"]
