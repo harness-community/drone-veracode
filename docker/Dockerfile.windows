@@ -11,7 +11,7 @@ ENV GODEBUG=netdns=go
 LABEL org.opencontainers.image.title="Veracode Plugin" \
       org.opencontainers.image.description="A Drone/Harness plugin for Veracode Upload and Scan on Windows" \
       org.opencontainers.image.version="v1.0.0" \
-      org.opencontainers.image.source="https://github.com/your-org/your-repo" \
+      org.opencontainers.image.source="https://github.com/harness-community/drone-veracode" \
       org.opencontainers.image.authors="c_vanisri.kanithi@harness.io"
 
 # Create necessary directories
