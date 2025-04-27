@@ -1,37 +1,38 @@
-# Stage 1: Pull Windows Server Core base to copy required system DLLs
-FROM mcr.microsoft.com/windows/servercore:ltsc2022 AS core
-
-# Stage 2: Main Veracode plugin image with OpenJDK installed
+# Use OpenJDK 17 on Windows Server Core 2022
 FROM openjdk:17-jdk-windowsservercore-ltsc2022
 
-# Switch to ContainerAdministrator (required for copying files and running install commands)
+# Switch to ContainerAdministrator user (needed for installs and setup)
 USER ContainerAdministrator
 
-# Set Go DNS behavior for better network resolution inside Windows containers
+# Set environment variable for Go to use Go DNS
 ENV GODEBUG=netdns=go
 
-# Copy important system DLL (needed for networking libraries)
-COPY --from=core /windows/system32/netapi32.dll /windows/system32/netapi32.dll
+# Add metadata (Optional but Recommended)
+LABEL org.opencontainers.image.title="Veracode Plugin" \
+      org.opencontainers.image.description="A Drone/Harness plugin for Veracode Upload and Scan on Windows" \
+      org.opencontainers.image.version="v1.0.0" \
+      org.opencontainers.image.source="https://github.com/your-org/your-repo" \
+      org.opencontainers.image.authors="c_vanisri.kanithi@harness.io"
 
-# Create required directories
+# Create necessary directories
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
 
-# Download the Veracode API wrapper safely with forced TLS 1.2
+# Download Veracode API wrapper safely (forcing TLS 1.2)
 RUN powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://downloads.veracode.com/authentication/api-wrapper-java-LATEST.zip' -OutFile 'C:\\veracode\\api-wrapper.zip'"
 
-# Expand the downloaded Veracode API wrapper zip
+# Expand the Veracode API wrapper
 RUN powershell -Command "Expand-Archive -Path 'C:\\veracode\\api-wrapper.zip' -DestinationPath 'C:\\veracode'"
 
-# Move the Veracode Java API wrapper jar to correct final location
+# Move the extracted JAR to the final location
 RUN powershell -Command "Copy-Item -Path 'C:\\veracode\\VeracodeJavaAPI.jar' -Destination 'C:\\opt\\veracode\\api-wrapper.jar'"
 
-# Copy your plugin binary executable into container
+# Copy your plugin executable into container
 ADD release/windows/amd64/plugin.exe C:/plugin.exe
 
 # Set working directory
 WORKDIR C:/
 
-# Set plugin executable as entrypoint
+# Set entrypoint to run the plugin
 ENTRYPOINT ["C:\\plugin.exe"]
