@@ -7,13 +7,6 @@ USER ContainerAdministrator
 # Set Go to use Go's own DNS resolver
 ENV GODEBUG=netdns=go
 
-# Metadata (optional but good)
-LABEL org.opencontainers.image.title="Veracode Plugin" \
-      org.opencontainers.image.description="Drone/Harness plugin for Veracode Upload and Scan (Windows)" \
-      org.opencontainers.image.version="v1.0.0" \
-      org.opencontainers.image.source="https://github.com/your-org/your-repo" \
-      org.opencontainers.image.authors="Your Name <your.email@example.com>"
-
 # Create necessary folders
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
