@@ -1,4 +1,4 @@
-# Use OpenJDK 17 with Windows Server Core 2022
+# Use OpenJDK 17 with Windows Server Core
 FROM openjdk:17-jdk-windowsservercore-ltsc2022
 
 # Set environment variable
@@ -9,18 +9,19 @@ RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Forc
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
 RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
 
-# Download the API wrapper zip and extract it
-RUN curl.exe -L "https://downloads.veracode.com/authentication/api-wrapper-java-LATEST.zip" -o "C:\\veracode\\api-wrapper.zip" && \
-    powershell -Command "Expand-Archive -Path 'C:\\veracode\\api-wrapper.zip' -DestinationPath 'C:\\veracode'"
+# Step 1: Download the Veracode API wrapper zip using curl.exe
+RUN curl.exe -L "https://downloads.veracode.com/authentication/api-wrapper-java-LATEST.zip" -o "C:\\veracode\\api-wrapper.zip"
 
-# Move and rename the extracted Veracode Java API to /opt/veracode/api-wrapper.jar
+# Step 2: Expand the downloaded zip file
+RUN powershell -Command "Expand-Archive -Path 'C:\\veracode\\api-wrapper.zip' -DestinationPath 'C:\\veracode'"
+
+# Step 3: Copy and rename the jar to /opt/veracode/api-wrapper.jar
 RUN powershell -Command "Copy-Item -Path 'C:\\veracode\\VeracodeJavaAPI.jar' -Destination 'C:\\opt\\veracode\\api-wrapper.jar'"
 
-# Copy the plugin binary
+# Copy your plugin binary
 ADD release/windows/amd64/plugin.exe C:\\plugin.exe
 
 # Set working directory
 WORKDIR C:\\
 
-# Set the plugin as entry point
 ENTRYPOINT ["C:\\plugin.exe"]
