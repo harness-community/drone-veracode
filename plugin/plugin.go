@@ -250,10 +250,22 @@ func splitPatterns(patterns string) []string {
 
 func handleResult(err error, args Args) error {
 	if err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			output := string(exitError.Stderr)
+
+			// Check if version already exists
+			if strings.Contains(output, "already exists") {
+				logrus.Warnf("⚠️ The version '%s' already exists on Veracode. Please delete the existing version or use a new version string.", args.Version)
+			} else {
+				logrus.Warnf("⚠️ UploadAndScan failed with error: %s", output)
+			}
+		} else {
+			logrus.Warnf("⚠️ UploadAndScan failed: %v (job not marked as failed)", err)
+		}
+
 		if args.CanFailJob {
 			return fmt.Errorf("❌ UploadAndScan failed: %w", err)
 		}
-		logrus.Warnf("⚠️ UploadAndScan failed: %v (job not marked as failed)", err)
 	} else {
 		logrus.Info("✅ UploadAndScan completed successfully")
 	}
