@@ -72,7 +72,8 @@ func Exec(ctx context.Context, args Args) error {
 	}
 
 	cmdArgs := buildVeracodeCommandArgs(args, finalFileList)
-	logrus.Infof("➡️  Executing: java %s", strings.Join(cmdArgs, " "))
+	maskedArgs := maskSensitiveArgs(cmdArgs)
+	logrus.Infof("➡️  Executing: java %s", strings.Join(maskedArgs, " "))
 
 	cmd := exec.CommandContext(ctx, "java", cmdArgs...)
 	cmd.Stdout = os.Stdout
@@ -89,6 +90,17 @@ func Exec(ctx context.Context, args Args) error {
 	}
 
 	return nil
+}
+
+func maskSensitiveArgs(args []string) []string {
+	masked := make([]string, len(args))
+	copy(masked, args)
+	for i := 0; i < len(masked)-1; i++ {
+		if masked[i] == "-vkey" || masked[i] == "-vid" || masked[i] == "-ppassword" {
+			masked[i+1] = "****"
+		}
+	}
+	return masked
 }
 
 func buildVeracodeCommandArgs(args Args, fileList string) []string {
@@ -257,10 +269,10 @@ func handleResult(err error, args Args) error {
 			if strings.Contains(output, "already exists") {
 				logrus.Warnf("⚠️ The version '%s' already exists on Veracode. Please delete the existing version or use a new version string.", args.Version)
 			} else {
-				logrus.Warnf("⚠️ UploadAndScan failed with error: %s", output)
+				logrus.Errorf("❌ UploadAndScan failed with error: %s", output)
 			}
 		} else {
-			logrus.Warnf("⚠️ UploadAndScan failed: %v (job not marked as failed)", err)
+			logrus.Errorf("❌ UploadAndScan failed: %v (job not marked as failed)", err)
 		}
 
 		if args.CanFailJob {
@@ -324,6 +336,9 @@ func isScanPublished(ctx context.Context, args Args) (bool, error) {
 		statusArgs = append(statusArgs, "-sandboxname", args.SandboxName)
 	}
 
+	masked := maskSensitiveArgs(statusArgs)
+	logrus.Infof("➡️  Checking build info with: java %s", strings.Join(masked, " "))
+
 	cmd := exec.CommandContext(ctx, "java", statusArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -346,6 +361,9 @@ func handlePolicyEvaluation(ctx context.Context, args Args) error {
 	if args.SandboxName != "" {
 		policyArgs = append(policyArgs, "-sandboxname", args.SandboxName)
 	}
+
+	masked := maskSensitiveArgs(policyArgs)
+	logrus.Infof("➡️  Checking build info with: java %s", strings.Join(masked, " "))
 
 	cmd := exec.CommandContext(ctx, "java", policyArgs...)
 	output, err := cmd.CombinedOutput()
