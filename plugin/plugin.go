@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -459,7 +460,7 @@ func runVeracodeResubmit(args Args) error {
 
 func fetchAnalysisID(args Args) (string, error) {
 	apiURL := fmt.Sprintf("https://api.veracode.com/was/configservice/v1/analyses?name=%s", url.QueryEscape(args.AnalysisName))
-	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodGet, nil)
+	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodGet, nil, args)
 	if err != nil {
 		return "", fmt.Errorf("API request failed: %v", err)
 	}
@@ -495,7 +496,7 @@ func buildResubmitPayload(maxDuration int) []byte {
 
 func resubmitAnalysis(args Args, analysisID string, payload []byte) error {
 	apiURL := fmt.Sprintf("https://api.veracode.com/was/configservice/v1/analyses/%s?method=PATCH", analysisID)
-	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodPut, bytes.NewBuffer(payload))
+	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodPut, bytes.NewBuffer(payload), args)
 	if err != nil {
 		return fmt.Errorf("API request failed: %v", err)
 	}
@@ -510,7 +511,7 @@ func resubmitAnalysis(args Args, analysisID string, payload []byte) error {
 	return fmt.Errorf("resubmit failed (status %d): %s", status, respBody)
 }
 
-func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer) (string, int, error) {
+func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
 	parsedURL, err := url.Parse(apiURL)
 	if err != nil {
 		return "", 0, fmt.Errorf("failed to parse URL: %v", err)
@@ -538,6 +539,28 @@ func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buf
 	}
 
 	client := &http.Client{}
+
+	if args.UseProxy {
+		proxyURL := fmt.Sprintf("http://%s:%s", args.PHost, args.PPort)
+		parsedProxyURL, err := url.Parse(proxyURL)
+		if err != nil {
+			return "", 0, fmt.Errorf("failed to parse proxy URL: %v", err)
+		}
+
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(parsedProxyURL),
+		}
+
+		// Add proxy authentication if provided
+		if args.PUser != "" && args.PPassword != "" {
+			transport.ProxyConnectHeader = http.Header{}
+			transport.ProxyConnectHeader.Set("Proxy-Authorization",
+				"Basic "+basicAuth(args.PUser, args.PPassword))
+		}
+
+		client.Transport = transport
+	}
+
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", 0, fmt.Errorf("request failed: %v", err)
@@ -549,4 +572,9 @@ func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buf
 		return "", resp.StatusCode, fmt.Errorf("failed to read response body: %v", err)
 	}
 	return string(respBytes), resp.StatusCode, nil
+}
+
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

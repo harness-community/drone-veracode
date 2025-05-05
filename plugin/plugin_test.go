@@ -201,7 +201,7 @@ func TestRunJavaCommandWithTimeout(t *testing.T) {
 
 // ---------- New Tests for Resubmit ----------
 
-func mockMakeHMACRequestSuccess(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer) (string, int, error) {
+func mockMakeHMACRequestSuccess(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
 	if method == "GET" && contains([]string{apiURL}, "analyses?name=") {
 		mockResp := `{
 			"_embedded": {
@@ -218,7 +218,7 @@ func mockMakeHMACRequestSuccess(apiID, apiKey, apiURL, method string, bodyBuffer
 	return "", 400, fmt.Errorf("unexpected mock call")
 }
 
-func mockMakeHMACRequestFailure(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer) (string, int, error) {
+func mockMakeHMACRequestFailure(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
 	return "mock error response", 500, fmt.Errorf("mock failure")
 }
 
