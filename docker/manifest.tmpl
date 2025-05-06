@@ -1,0 +1,24 @@
+image: plugins/veracode:{{- if build.tag }}{{ trimPrefix "v" build.tag }}{{ else }}latest{{ end }}
+{{- if build.tags }}
+tags:
+{{- range build.tags }}
+  - {{ . }}
+{{- end }}
+{{- end }}
+manifests:
+  -
+    image: plugins/veracode:{{- if build.tag }}{{ trimPrefix "v" build.tag }}-{{ end }}linux-amd64
+    platform:
+      architecture: amd64
+      os: linux
+  -
+    image: plugins/veracode:{{- if build.tag }}{{ trimPrefix "v" build.tag }}-{{ end }}linux-arm64
+    platform:
+      variant: v8
+      architecture: arm64
+      os: linux
+  -
+    image: plugins/veracode:{{- if build.tag }}{{ trimPrefix "v" build.tag }}-{{ end }}windows-amd64
+    platform:
+      architecture: amd64
+      os: windows

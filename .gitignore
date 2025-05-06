@@ -1,0 +1,6 @@
+.env
+release/
+drone-nunit
+NOTES*
+output.json
+.vscode/
