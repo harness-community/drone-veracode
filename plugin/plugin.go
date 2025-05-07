@@ -288,7 +288,8 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 	logrus.Info("⏳ Waiting for scan to complete...")
 
 	timeout := time.After(time.Duration(args.Timeout) * time.Minute)
-	tick := time.Tick(1 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -299,7 +300,7 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 			logrus.Warn("⚠️ Scan polling timed out, but job not marked as failed")
 			return nil
 
-		case <-tick:
+		case <-ticker.C:
 			logrus.Info("🔁 Checking scan status...")
 
 			published, err := isScanPublished(ctx, args)
@@ -342,7 +343,7 @@ func isScanPublished(ctx context.Context, args Args) (bool, error) {
 	cmd := exec.CommandContext(ctx, "java", statusArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("failed to check build info: %w", err)
 	}
 
 	return strings.Contains(string(output), "Published"), nil
@@ -363,16 +364,16 @@ func handlePolicyEvaluation(ctx context.Context, args Args) error {
 	}
 
 	masked := maskSensitiveArgs(policyArgs)
-	logrus.Infof("➡️  Checking build info with: java %s", strings.Join(masked, " "))
+	logrus.Infof("➡️  Checking policy status with: java %s", strings.Join(masked, " "))
 
 	cmd := exec.CommandContext(ctx, "java", policyArgs...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("❌ Failed to check policy status: %v", err)
+		return fmt.Errorf("❌ Failed to check policy status: %w", err)
 	}
 
 	if strings.Contains(string(output), PolicyDidNotPass) || strings.Contains(string(output), PolicyConditionalPass) {
-		return fmt.Errorf("❌ Policy evaluation returned Did Not Pass / Conditional Pass. Marking build as Failed: %w", err)
+		return fmt.Errorf("❌ Policy evaluation returned Did Not Pass / Conditional Pass. Marking build as Failed")
 	}
 
 	logrus.Info("✅ Policy evaluation passed")
