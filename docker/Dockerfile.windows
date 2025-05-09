@@ -1,0 +1,31 @@
+# Use OpenJDK 17 on Windows Server Core
+FROM openjdk:17-jdk-windowsservercore-ltsc2022
+
+# Switch to ContainerAdministrator user (needed for setup)
+USER ContainerAdministrator
+
+# Set Go to use Go's own DNS resolver
+ENV GODEBUG=netdns=go
+
+# Create necessary folders
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\veracode' -Force"
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\opt\\veracode' -Force"
+RUN powershell -Command "New-Item -ItemType Directory -Path 'C:\\Users\\ContainerUser\\.veracode' -Force"
+
+# Download Veracode Java API Wrapper (from correct Maven Central URL) with forced TLS 1.2
+RUN powershell -Command "[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -Uri 'https://repo1.maven.org/maven2/com/veracode/vosp/api/wrappers/vosp-api-wrappers-java/24.10.15.0/vosp-api-wrappers-java-24.10.15.0-dist.zip' -OutFile 'C:\\veracode\\api-wrapper.zip'"
+
+# Expand the downloaded Veracode zip
+RUN powershell -Command "Expand-Archive -Path 'C:\\veracode\\api-wrapper.zip' -DestinationPath 'C:\\veracode'"
+
+# Move VeracodeJavaAPI.jar to target /opt/veracode/api-wrapper.jar
+RUN powershell -Command "Copy-Item -Path (Get-ChildItem -Path 'C:\\veracode' -Recurse -Filter 'VeracodeJavaAPI.jar').FullName -Destination 'C:\\opt\\veracode\\api-wrapper.jar'"
+
+# Copy your Go plugin Windows executable
+ADD release/windows/amd64/plugin.exe C:/plugin.exe
+
+# Set working directory
+WORKDIR C:/
+
+# Set plugin executable as entrypoint
+ENTRYPOINT ["C:\\plugin.exe"]
