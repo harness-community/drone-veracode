@@ -1,24 +1,58 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/antfie/veracode-go-hmac-authentication/hmac"
 	"github.com/georgeJobs/go-antpathmatcher"
 	"github.com/sirupsen/logrus"
 )
 
+var makeHMACRequestFunc = makeHMACRequest
+
 const (
 	PolicyDidNotPass      = "Did Not Pass"
 	PolicyConditionalPass = "Conditional Pass"
+
+	FeatureVeracode         = "veracode"
+	FeatureVeracodeResubmit = "veracode_resubmit"
 )
 
+type AnalysesResponse struct {
+	Embedded struct {
+		Analyses []struct {
+			AnalysisID string `json:"analysis_id"`
+		} `json:"analyses"`
+	} `json:"_embedded"`
+}
+
+type ResubmitPayload struct {
+	Schedule struct {
+		Duration struct {
+			Length int    `json:"length"`
+			Unit   string `json:"unit"`
+		} `json:"duration"`
+		Now            bool   `json:"now"`
+		ScheduleStatus string `json:"schedule_status"`
+		StartDate      string `json:"start_date"`
+	} `json:"schedule"`
+}
+
 type Args struct {
+	FeatureType             string `envconfig:"PLUGIN_FEATURE_TYPE" default:"veracode"`
 	AppName                 string `envconfig:"PLUGIN_APPLICATION_NAME"`
 	Criticality             string `envconfig:"PLUGIN_CRITICALITY"`
 	SandboxName             string `envconfig:"PLUGIN_SANDBOX_NAME"`
@@ -48,6 +82,11 @@ type Args struct {
 	UseProxy                bool   `envconfig:"PLUGIN_USE_PROXY"`
 	Version                 string `envconfig:"PLUGIN_VERSION"`
 	Level                   string `envconfig:"PLUGIN_LEVEL"`
+
+	// Resubmit-specific
+	AnalysisName          string `envconfig:"PLUGIN_ANALYSIS_NAME"`
+	MaximumDuration       int    `envconfig:"PLUGIN_MAXIMUM_DURATION" default:"3"`
+	FailBuildAsScanFailed bool   `envconfig:"PLUGIN_FAIL_BUILD_AS_SCAN_FAILED" default:"false"`
 }
 
 func ValidateInputs(args Args) error {
@@ -64,7 +103,22 @@ func ValidateInputs(args Args) error {
 }
 
 func Exec(ctx context.Context, args Args) error {
+	switch args.FeatureType {
+	case FeatureVeracode:
+		return runVeracodePlugin(ctx, args)
+	case FeatureVeracodeResubmit:
+		return runVeracodeResubmit(args)
+	default:
+		return fmt.Errorf("❌ Unknown PLUGIN_FEATURE_TYPE: %s (expected: '%s' or '%s')", args.FeatureType, FeatureVeracode, FeatureVeracodeResubmit)
+	}
+}
+
+func runVeracodePlugin(ctx context.Context, args Args) error {
 	logrus.Infof("🟢 Starting Veracode UploadAndScan")
+
+	if err := ValidateInputs(args); err != nil {
+		return fmt.Errorf("input validation failed: %v", err)
+	}
 
 	finalFileList, err := resolveUploadFileList(args.UploadIncludesPattern, args.UploadExcludesPattern)
 	if err != nil {
@@ -424,4 +478,150 @@ func extractPolicyComplianceStatus(xmlStr string) string {
 		return ""
 	}
 	return xmlStr[start : start+end]
+}
+
+func runVeracodeResubmit(args Args) error {
+	logrus.Infof("🟢 Starting Veracode Resubmit")
+	if args.AnalysisName == "" || args.VID == "" || args.VKey == "" {
+		return fmt.Errorf("missing required env: PLUGIN_ANALYSIS_NAME, PLUGIN_VID, PLUGIN_VKEY")
+	}
+
+	analysisID, err := fetchAnalysisID(args)
+	if err != nil {
+		return fmt.Errorf("error fetching analysis ID: %v", err)
+	}
+	log.Printf("✅ Fetched Analysis ID: %s", analysisID)
+
+	payload := buildResubmitPayload(args.MaximumDuration)
+
+	if err := resubmitAnalysis(args, analysisID, payload); err != nil {
+		if args.FailBuildAsScanFailed {
+			return fmt.Errorf("❌ Resubmit failed and failBuildAsScanFailed is enabled: %v", err)
+		}
+		log.Printf("❌ Resubmit failed: %v", err)
+	} else {
+		log.Println("✅ Resubmit Successful!")
+	}
+	return nil
+}
+
+func fetchAnalysisID(args Args) (string, error) {
+	apiURL := fmt.Sprintf("https://api.veracode.com/was/configservice/v1/analyses?name=%s", url.QueryEscape(args.AnalysisName))
+	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodGet, nil, args)
+	if err != nil {
+		return "", fmt.Errorf("API request failed: %v", err)
+	}
+	if status != 200 {
+		return "", fmt.Errorf("failed to fetch analysis (status %d): %s", status, respBody)
+	}
+
+	var resp AnalysesResponse
+	if err := json.Unmarshal([]byte(respBody), &resp); err != nil {
+		return "", fmt.Errorf("failed to parse analysis response: %v", err)
+	}
+	if len(resp.Embedded.Analyses) == 0 {
+		return "", fmt.Errorf("no analysis found with name: %s", args.AnalysisName)
+	}
+	return resp.Embedded.Analyses[0].AnalysisID, nil
+}
+
+func buildResubmitPayload(maxDuration int) []byte {
+	startTime := time.Now().Format(time.RFC3339)
+	payload := ResubmitPayload{}
+	payload.Schedule.Duration.Length = maxDuration
+	payload.Schedule.Duration.Unit = "DAY"
+	payload.Schedule.Now = false
+	payload.Schedule.ScheduleStatus = "ACTIVE"
+	payload.Schedule.StartDate = startTime
+
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		log.Fatalf("❌ Failed to marshal payload: %v", err)
+	}
+	return jsonData
+}
+
+func resubmitAnalysis(args Args, analysisID string, payload []byte) error {
+	apiURL := fmt.Sprintf("https://api.veracode.com/was/configservice/v1/analyses/%s?method=PATCH", analysisID)
+	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodPut, bytes.NewBuffer(payload), args)
+	if err != nil {
+		return fmt.Errorf("API request failed: %v", err)
+	}
+	log.Printf("Status: %d", status)
+
+	if status == 204 {
+		log.Println("✅ Resubmit successful (204 No Content)")
+		return nil
+	}
+
+	log.Printf("❌ Response Body (error case): %s", respBody)
+	return fmt.Errorf("resubmit failed (status %d): %s", status, respBody)
+}
+
+func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
+	parsedURL, err := url.Parse(apiURL)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to parse URL: %v", err)
+	}
+
+	var body io.Reader
+	if bodyBuffer != nil {
+		body = bodyBuffer
+	} else {
+		body = http.NoBody
+	}
+
+	req, err := http.NewRequest(method, parsedURL.String(), body)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to create request: %v", err)
+	}
+
+	authHeader, err := hmac.CalculateAuthorizationHeader(parsedURL, method, apiID, apiKey)
+	if err != nil {
+		return "", 0, fmt.Errorf("failed to calculate HMAC header: %v", err)
+	}
+	req.Header.Add("Authorization", authHeader)
+	if method == http.MethodPut {
+		req.Header.Set("Content-Type", "application/json")
+	}
+
+	client := &http.Client{}
+
+	if args.UseProxy {
+		proxyURL := fmt.Sprintf("http://%s:%s", args.PHost, args.PPort)
+		parsedProxyURL, err := url.Parse(proxyURL)
+		if err != nil {
+			return "", 0, fmt.Errorf("failed to parse proxy URL: %v", err)
+		}
+
+		transport := &http.Transport{
+			Proxy: http.ProxyURL(parsedProxyURL),
+		}
+
+		// Add proxy authentication if provided
+		if args.PUser != "" && args.PPassword != "" {
+			transport.ProxyConnectHeader = http.Header{}
+			transport.ProxyConnectHeader.Set("Proxy-Authorization",
+				"Basic "+basicAuth(args.PUser, args.PPassword))
+		}
+
+		client.Transport = transport
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", 0, fmt.Errorf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	respBytes, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", resp.StatusCode, fmt.Errorf("failed to read response body: %v", err)
+	}
+	return string(respBytes), resp.StatusCode, nil
+}
+
+func basicAuth(username, password string) string {
+	auth := username + ":" + password
+	return base64.StdEncoding.EncodeToString([]byte(auth))
 }

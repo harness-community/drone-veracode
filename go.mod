@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/antfie/veracode-go-hmac-authentication v1.0.0
 	github.com/bmatcuk/doublestar/v4 v4.8.1
 	github.com/joho/godotenv v1.5.1
 	golang.org/x/sys v0.0.0-20220715151400-c0bba94af5f8 // indirect
