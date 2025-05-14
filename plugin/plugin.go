@@ -342,7 +342,8 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 	logrus.Info("⏳ Waiting for scan to complete...")
 
 	timeout := time.After(time.Duration(args.Timeout) * time.Minute)
-	tick := time.Tick(1 * time.Minute)
+	ticker := time.NewTicker(1 * time.Minute)
+	defer ticker.Stop()
 
 	for {
 		select {
@@ -353,10 +354,10 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 			logrus.Warn("⚠️ Scan polling timed out, but job not marked as failed")
 			return nil
 
-		case <-tick:
+		case <-ticker.C:
 			logrus.Info("🔁 Checking scan status...")
 
-			published, err := isScanPublished(ctx, args)
+			published, policyStatus, err := isScanPublished(ctx, args)
 			if err != nil {
 				logrus.Warnf("⚠️ Failed to check scan status: %v", err)
 				continue
@@ -365,11 +366,11 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 				continue
 			}
 
-			logrus.Info("✅ Scan completed and published!")
+			logrus.Infof("✅ Scan completed and published! Policy compliance status: %s", policyStatus)
 
 			if args.CanFailJob {
-				if err := handlePolicyEvaluation(ctx, args); err != nil {
-					return err
+				if policyStatus == "Did Not Pass" || policyStatus == "Conditional Pass" {
+					return fmt.Errorf("❌ Policy evaluation returned %s. Marking build as Failed", policyStatus)
 				}
 			}
 
@@ -378,11 +379,16 @@ func waitForScanCompletion(ctx context.Context, args Args) error {
 	}
 }
 
-func isScanPublished(ctx context.Context, args Args) (bool, error) {
+func isScanPublished(ctx context.Context, args Args) (bool, string, error) {
+	appID, err := getAppID(ctx, args)
+	if err != nil {
+		return false, "", err
+	}
+
 	statusArgs := []string{
 		"-jar", "/opt/veracode/api-wrapper.jar",
 		"-action", "GetBuildInfo",
-		"-appname", args.AppName,
+		"-appid", appID,
 		"-vid", args.VID,
 		"-vkey", args.VKey,
 	}
@@ -395,42 +401,83 @@ func isScanPublished(ctx context.Context, args Args) (bool, error) {
 
 	cmd := exec.CommandContext(ctx, "java", statusArgs...)
 	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	logrus.Infof("🔍 CLI raw output:\n%s", outputStr)
+
 	if err != nil {
-		return false, err
+		return false, "", fmt.Errorf("failed to check build info: %w", err)
 	}
 
-	return strings.Contains(string(output), "Published"), nil
+	isPublished := strings.Contains(outputStr, "published") || strings.Contains(outputStr, "Results Ready")
+	policyStatus := extractPolicyComplianceStatus(outputStr)
+
+	return isPublished, policyStatus, nil
 }
 
-func handlePolicyEvaluation(ctx context.Context, args Args) error {
-	logrus.Info("🔍 Evaluating policy compliance for Failed job...")
-
-	policyArgs := []string{
+func getAppID(ctx context.Context, args Args) (string, error) {
+	appListArgs := []string{
 		"-jar", "/opt/veracode/api-wrapper.jar",
-		"-action", "PassFail",
-		"-appname", args.AppName,
+		"-action", "GetAppList",
 		"-vid", args.VID,
 		"-vkey", args.VKey,
 	}
-	if args.SandboxName != "" {
-		policyArgs = append(policyArgs, "-sandboxname", args.SandboxName)
-	}
 
-	masked := maskSensitiveArgs(policyArgs)
-	logrus.Infof("➡️  Checking build info with: java %s", strings.Join(masked, " "))
+	masked := maskSensitiveArgs(appListArgs)
+	logrus.Infof("➡️  Fetching App ID with: java %s", strings.Join(masked, " "))
 
-	cmd := exec.CommandContext(ctx, "java", policyArgs...)
+	cmd := exec.CommandContext(ctx, "java", appListArgs...)
 	output, err := cmd.CombinedOutput()
+	outputStr := string(output)
+	logrus.Infof("🔍 AppList raw output:\n%s", outputStr)
+
 	if err != nil {
-		return fmt.Errorf("❌ Failed to check policy status: %v", err)
+		return "", fmt.Errorf("failed to get app list: %w", err)
 	}
 
-	if strings.Contains(string(output), PolicyDidNotPass) || strings.Contains(string(output), PolicyConditionalPass) {
-		return fmt.Errorf("❌ Policy evaluation returned Did Not Pass / Conditional Pass. Marking build as Failed: %w", err)
+	appID := extractAppID(outputStr, args.AppName)
+	if appID == "" {
+		return "", fmt.Errorf("app name '%s' not found in app list", args.AppName)
 	}
 
-	logrus.Info("✅ Policy evaluation passed")
-	return nil
+	logrus.Infof("✅ Found App ID for '%s': %s", args.AppName, appID)
+	return appID, nil
+}
+
+func extractAppID(xmlStr, appName string) string {
+	// Look for <app app_id="xxx" app_name="yyy" />
+	appTag := `<app `
+	idKey := `app_id="`
+
+	entries := strings.Split(xmlStr, appTag)
+	for _, entry := range entries {
+		if strings.Contains(entry, `app_name="`+appName+`"`) {
+			// Find app_id
+			idStart := strings.Index(entry, idKey)
+			if idStart == -1 {
+				continue
+			}
+			idStart += len(idKey)
+			idEnd := strings.Index(entry[idStart:], `"`)
+			if idEnd == -1 {
+				continue
+			}
+			return entry[idStart : idStart+idEnd]
+		}
+	}
+	return ""
+}
+
+func extractPolicyComplianceStatus(xmlStr string) string {
+	start := strings.Index(xmlStr, `policy_compliance_status="`)
+	if start == -1 {
+		return ""
+	}
+	start += len(`policy_compliance_status="`)
+	end := strings.Index(xmlStr[start:], `"`)
+	if end == -1 {
+		return ""
+	}
+	return xmlStr[start : start+end]
 }
 
 func runVeracodeResubmit(args Args) error {
