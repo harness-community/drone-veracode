@@ -313,16 +313,16 @@ func pollAnalysisStatus(analysisID string, args Args) (string, error) {
 	interval := 30 * time.Second
 	elapsed := time.Duration(0)
 
-	logrus.Infof("⏳ Polling analysis status for up to %v...", timeout)
+	logrus.Infof("\n⏳ Polling analysis status for up to %v...", timeout)
 
 	for elapsed < timeout {
 		status, err := getAnalysisStatus(analysisID, args)
 		if err != nil {
-			logrus.Errorf("❌ Error checking analysis status: %v", err)
+			logrus.Errorf("\n❌ Error checking analysis status: %v", err)
 			return "", err
 		}
 
-		logrus.Infof("🔁 Status: %s (elapsed: %v)", status, elapsed)
+		logrus.Infof("\n🔁 Status: %s (elapsed: %v)", status, elapsed)
 
 		if status == "COMPLETED" || status == "FAILED" {
 			return status, nil
@@ -332,7 +332,7 @@ func pollAnalysisStatus(analysisID string, args Args) (string, error) {
 		elapsed += interval
 	}
 
-	return "", fmt.Errorf("polling timeout reached (%v) for analysis ID: %s", timeout, analysisID)
+	return "", fmt.Errorf("\npolling timeout reached (%v) for analysis ID: %s", timeout, analysisID)
 }
 
 // Call GET /analyses/{id} to fetch current status
@@ -341,25 +341,25 @@ func getAnalysisStatus(analysisID string, args Args) (string, error) {
 	apiURL := fmt.Sprintf("https://api.veracode.com/was/configservice/v1/analyses/%s", analysisID)
 	respBody, status, err := makeHMACRequestFunc(args.VID, args.VKey, apiURL, http.MethodGet, nil, args)
 	if err != nil {
-		return "", fmt.Errorf("failed to fetch status: %w", err)
+		return "", fmt.Errorf("\nfailed to fetch status: %w", err)
 	}
 	if status != 200 {
-		return "", fmt.Errorf("non-200 response (%d): %s", status, respBody)
+		return "", fmt.Errorf("\nnon-200 response (%d): %s", status, respBody)
 	}
 
 	var parsed map[string]interface{}
 	if err := json.Unmarshal([]byte(respBody), &parsed); err != nil {
-		return "", fmt.Errorf("failed to parse analysis status JSON: %w", err)
+		return "", fmt.Errorf("\nfailed to parse analysis status JSON: %w", err)
 	}
 
 	occurrence, ok := parsed["latest_occurrence_status"].(map[string]interface{})
 	if !ok {
-		return "", fmt.Errorf("missing 'latest_occurrence_status' in response")
+		return "", fmt.Errorf("\nmissing 'latest_occurrence_status' in response")
 	}
 
 	statusType, ok := occurrence["status_type"].(string)
 	if !ok {
-		return "", fmt.Errorf("invalid or missing 'status_type' in response")
+		return "", fmt.Errorf("\ninvalid or missing 'status_type' in response")
 	}
 
 	switch statusType {
