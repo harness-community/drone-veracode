@@ -1,7 +1,9 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -194,5 +196,101 @@ func TestRunJavaCommandWithTimeout(t *testing.T) {
 
 	if err == nil || !strings.Contains(err.Error(), "timeout") {
 		t.Log("Simulated timeout case might need adjustment")
+	}
+}
+
+// ---------- New Tests for Resubmit ----------
+
+func mockMakeHMACRequestSuccess(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
+	if method == "GET" && contains([]string{apiURL}, "analyses?name=") {
+		mockResp := `{
+			"_embedded": {
+				"analyses": [
+					{ "analysis_id": "mock-analysis-id-123" }
+				]
+			}
+		}`
+		return mockResp, 200, nil
+	}
+	if method == "PUT" && contains([]string{apiURL}, "analyses/mock-analysis-id-123") {
+		return "", 204, nil
+	}
+	return "", 400, fmt.Errorf("unexpected mock call")
+}
+
+func mockMakeHMACRequestFailure(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buffer, args Args) (string, int, error) {
+	return "mock error response", 500, fmt.Errorf("mock failure")
+}
+
+// --- Unit Tests ---
+
+func TestFetchAnalysisIDSuccess(t *testing.T) {
+	original := makeHMACRequestFunc
+	defer func() { makeHMACRequestFunc = original }()
+	makeHMACRequestFunc = mockMakeHMACRequestSuccess
+
+	args := Args{
+		AnalysisName: "MockAnalysis",
+		VID:          "mockVID",
+		VKey:         "mockVKey",
+	}
+
+	id, err := fetchAnalysisID(args)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if id != "mock-analysis-id-123" {
+		t.Fatalf("expected mock-analysis-id-123, got: %s", id)
+	}
+}
+
+func TestFetchAnalysisIDFailure(t *testing.T) {
+	original := makeHMACRequestFunc
+	defer func() { makeHMACRequestFunc = original }()
+	makeHMACRequestFunc = mockMakeHMACRequestFailure
+
+	args := Args{
+		AnalysisName: "MockAnalysis",
+		VID:          "mockVID",
+		VKey:         "mockVKey",
+	}
+
+	_, err := fetchAnalysisID(args)
+	if err == nil {
+		t.Fatal("expected error, got none")
+	}
+}
+
+func TestResubmitAnalysisSuccess(t *testing.T) {
+	original := makeHMACRequestFunc
+	defer func() { makeHMACRequestFunc = original }()
+	makeHMACRequestFunc = mockMakeHMACRequestSuccess
+
+	args := Args{
+		VID:  "mockVID",
+		VKey: "mockVKey",
+	}
+
+	payload := buildResubmitPayload(3)
+	err := resubmitAnalysis(args, "mock-analysis-id-123", payload)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+}
+
+func TestResubmitAnalysisFailure(t *testing.T) {
+	original := makeHMACRequestFunc
+	defer func() { makeHMACRequestFunc = original }()
+	makeHMACRequestFunc = mockMakeHMACRequestFailure
+
+	args := Args{
+		VID:  "mockVID",
+		VKey: "mockVKey",
+	}
+
+	payload := buildResubmitPayload(3)
+	err := resubmitAnalysis(args, "mock-analysis-id-123", payload)
+	if err == nil {
+		t.Fatal("expected error, got none")
 	}
 }
