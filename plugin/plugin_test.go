@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// ---------- Helper & Mock Logic ----------
-
 // Overrideable execCommandContext
 var execCommandContext = exec.CommandContext
 

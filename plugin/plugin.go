@@ -72,6 +72,6 @@ func Exec(ctx context.Context, args Args) error {
 	case VeracodeResubmit:
 		return runVeracodeResubmit(args)
 	default:
-		return fmt.Errorf("\n❌ Unknown PLUGIN_FEATURE_TYPE: %s (expected: '%s' or '%s')", args.FeatureType, VeracodeStaticScan)
+		return fmt.Errorf("\n❌ Unknown PLUGIN_FEATURE_TYPE: %s (expected: '%s' or '%s')", args.FeatureType, VeracodeStaticScan, VeracodeResubmit)
 	}
 }
