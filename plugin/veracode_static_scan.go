@@ -1,10 +1,13 @@
 package plugin
 
 import (
+	"bytes"
 	"context"
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
+	"runtime"
 	"strings"
 	"time"
 
@@ -18,7 +21,7 @@ func runVeracodeStaticScanPlugin(ctx context.Context, args Args) error {
 		return fmt.Errorf("input validation failed: %v", err)
 	}
 
-	finalFileList, err := resolveUploadFileList(args.UploadIncludesPattern, args.UploadExcludesPattern)
+	finalFileList, err := resolveUploadFileList(args.Workspace, args.UploadIncludesPattern, args.UploadExcludesPattern)
 	if err != nil {
 		return fmt.Errorf("failed to resolve upload file list: %w", err)
 	}
@@ -44,6 +47,21 @@ func runVeracodeStaticScanPlugin(ctx context.Context, args Args) error {
 	return nil
 }
 
+func getVeracodeJarPath() string {
+	// 1. Allow external override
+	if path := os.Getenv("VERACODE_JAR_PATH"); path != "" {
+		return path
+	}
+
+	// 2. OS-aware fallback
+	if runtime.GOOS == "windows" {
+		return "C:/opt/veracode/api-wrapper.jar"
+	}
+
+	// 3. Default Linux path
+	return "/opt/veracode/api-wrapper.jar"
+}
+
 func maskSensitiveArgs(args []string) []string {
 	masked := make([]string, len(args))
 	copy(masked, args)
@@ -57,7 +75,7 @@ func maskSensitiveArgs(args []string) []string {
 
 func buildVeracodeCommandArgs(args Args, fileList string) []string {
 	cmdArgs := []string{
-		"-jar", "/opt/veracode/api-wrapper.jar",
+		"-jar", getVeracodeJarPath(),
 		"-action", "UploadAndScan",
 		"-appname", args.AppName,
 		"-filepath", fileList,
@@ -111,24 +129,51 @@ func buildVeracodeCommandArgs(args Args, fileList string) []string {
 }
 
 func runJavaCommandWithTimeout(cmd *exec.Cmd, args Args) error {
-	done := make(chan error, 1)
-	go func() {
-		done <- cmd.Run()
-	}()
+	ctx := context.Background()
+	var cancel context.CancelFunc
 
 	if args.Timeout > 0 {
-		select {
-		case err := <-done:
-			return handleResult(err, args)
-		case <-time.After(time.Duration(args.Timeout) * time.Minute):
+		ctx, cancel = context.WithTimeout(ctx, time.Duration(args.Timeout)*time.Minute)
+		defer cancel()
+	}
+
+	// Attach context to command
+	cmd = exec.CommandContext(ctx, cmd.Path, cmd.Args[1:]...)
+	// Optional: capture output
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- cmd.Run()
+	}()
+
+	select {
+	case err := <-errChan:
+		logrus.Infof("📤 Stdout: %s", stdout.String())
+		logrus.Infof("📥 Stderr: %s", stderr.String())
+		// Command finished in time
+		return handleResult(err, args)
+
+	case <-ctx.Done():
+		// Timeout occurred
+		if ctx.Err() == context.DeadlineExceeded {
+			logrus.Warnf("⚠️ UploadAndScan timed out after %d minutes", args.Timeout)
+
+			// Ensure process is killed
+			if cmd.Process != nil {
+				_ = cmd.Process.Kill() // Optional: handle kill error if needed
+				logrus.Warn("💀 Process killed due to timeout")
+			}
+
 			if args.TimeoutFailsJob {
 				return fmt.Errorf("❌ UploadAndScan timed out after %d minutes", args.Timeout)
 			}
-			logrus.Warnf("⚠️ UploadAndScan timed out after %d minutes, job not marked as failed", args.Timeout)
 			return nil
 		}
-	} else {
-		return handleResult(<-done, args)
+		// Other context error
+		return ctx.Err()
 	}
 }
 
@@ -204,7 +249,7 @@ func isScanPublished(ctx context.Context, args Args) (bool, string, error) {
 	}
 
 	statusArgs := []string{
-		"-jar", "/opt/veracode/api-wrapper.jar",
+		"-jar", getVeracodeJarPath(),
 		"-action", "GetBuildInfo",
 		"-appid", appID,
 		"-vid", args.VID,
@@ -234,7 +279,7 @@ func isScanPublished(ctx context.Context, args Args) (bool, string, error) {
 
 func getAppID(ctx context.Context, args Args) (string, error) {
 	appListArgs := []string{
-		"-jar", "/opt/veracode/api-wrapper.jar",
+		"-jar", getVeracodeJarPath(),
 		"-action", "GetAppList",
 		"-vid", args.VID,
 		"-vkey", args.VKey,
@@ -246,7 +291,7 @@ func getAppID(ctx context.Context, args Args) (string, error) {
 	cmd := exec.CommandContext(ctx, "java", appListArgs...)
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
-	logrus.Infof("🔍 AppList raw output:\n%s", outputStr)
+	logrus.Debugf("🔍 AppList raw output:\n%s", outputStr)
 
 	if err != nil {
 		return "", fmt.Errorf("failed to get app list: %w", err)
@@ -262,38 +307,27 @@ func getAppID(ctx context.Context, args Args) (string, error) {
 }
 
 func extractAppID(xmlStr, appName string) string {
-	// Look for <app app_id="xxx" app_name="yyy" />
-	appTag := `<app `
-	idKey := `app_id="`
+	var list AppList
+	err := xml.Unmarshal([]byte(xmlStr), &list)
+	if err != nil {
+		fmt.Printf("❌ Failed to parse XML: %v\n", err)
+		return ""
+	}
 
-	entries := strings.Split(xmlStr, appTag)
-	for _, entry := range entries {
-		if strings.Contains(entry, `app_name="`+appName+`"`) {
-			// Find app_id
-			idStart := strings.Index(entry, idKey)
-			if idStart == -1 {
-				continue
-			}
-			idStart += len(idKey)
-			idEnd := strings.Index(entry[idStart:], `"`)
-			if idEnd == -1 {
-				continue
-			}
-			return entry[idStart : idStart+idEnd]
+	for _, app := range list.Apps {
+		if app.AppName == appName {
+			return app.AppID
 		}
 	}
 	return ""
 }
 
 func extractPolicyComplianceStatus(xmlStr string) string {
-	start := strings.Index(xmlStr, `policy_compliance_status="`)
-	if start == -1 {
+	var buildInfo BuildInfo
+	err := xml.Unmarshal([]byte(xmlStr), &buildInfo)
+	if err != nil {
+		fmt.Printf("❌ Failed to parse build info XML: %v\n", err)
 		return ""
 	}
-	start += len(`policy_compliance_status="`)
-	end := strings.Index(xmlStr[start:], `"`)
-	if end == -1 {
-		return ""
-	}
-	return xmlStr[start : start+end]
+	return buildInfo.Build.PolicyComplianceStatus
 }

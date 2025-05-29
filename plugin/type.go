@@ -28,3 +28,18 @@ type BuildInfo struct {
 		PolicyComplianceStatus string `xml:"policy_compliance_status,attr"`
 	} `xml:"build"`
 }
+
+type Response struct {
+	XMLName xml.Name `xml:"apps"`
+	Apps    []App    `xml:"app"`
+}
+
+type AppList struct {
+	XMLName xml.Name `xml:"https://analysiscenter.veracode.com/schema/2.0/applist applist"`
+	Apps    []App    `xml:"app"`
+}
+
+type App struct {
+	AppID   string `xml:"app_id,attr"`
+	AppName string `xml:"app_name,attr"`
+}

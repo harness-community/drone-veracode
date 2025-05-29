@@ -11,9 +11,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/antfie/veracode-go-hmac-authentication/hmac"
 	"github.com/georgeJobs/go-antpathmatcher"
+	"github.com/sirupsen/logrus"
 )
 
 var makeHMACRequestFunc = makeHMACRequest
@@ -45,7 +47,9 @@ func makeHMACRequest(apiID, apiKey, apiURL, method string, bodyBuffer *bytes.Buf
 		req.Header.Set("Content-Type", "application/json")
 	}
 
-	client := &http.Client{}
+	client := &http.Client{
+		Timeout: time.Second * 30,
+	}
 
 	if args.UseProxy {
 		proxyURL := fmt.Sprintf("http://%s:%s", args.PHost, args.PPort)
@@ -133,25 +137,35 @@ func ConvertToBase64(input string) string {
 	return encoded
 }
 
-func resolveUploadFileList(includes, excludes string) (string, error) {
-	workspace := os.Getenv("DRONE_WORKSPACE")
-	if workspace == "" {
+func resolveUploadFileList(workspace, includes, excludes string) (string, error) {
+	// 1. Default to DRONE_WORKSPACE if workspace is empty
+	if strings.TrimSpace(workspace) == "" {
+		workspace = os.Getenv("DRONE_WORKSPACE")
+	}
+
+	// 2. Fallback to current working directory
+	if strings.TrimSpace(workspace) == "" {
 		var err error
 		workspace, err = os.Getwd()
 		if err != nil {
-			return "", fmt.Errorf("could not determine workspace: %w", err)
+			return "", fmt.Errorf("❌ could not determine workspace: %w", err)
 		}
 	}
 
+	logrus.Debugf("📂 Using workspace: %s", workspace)
+	logrus.Debugf("🔍 Includes: %s | Excludes: %s", includes, excludes)
+
+	// 4. Get matched files using ant-style matcher
 	matches, err := getAntMatchedFiles(workspace, includes, excludes)
 	if err != nil {
-		return "", fmt.Errorf("failed to match files: %w", err)
+		return "", fmt.Errorf("❌ failed to match files: %w", err)
 	}
 
 	if len(matches) == 0 {
-		return "", fmt.Errorf("no files matched for upload")
+		return "", fmt.Errorf("⚠️ no files matched for upload (workspace: %s, includes: %s)", workspace, includes)
 	}
 
+	logrus.Infof("✅ Matched %d files for upload", len(matches))
 	return strings.Join(matches, ","), nil
 }
 

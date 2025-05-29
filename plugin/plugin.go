@@ -15,7 +15,7 @@ const (
 )
 
 type Args struct {
-	FeatureType             string `envconfig:"PLUGIN_FEATURE_TYPE" default:"veracode"`
+	OperationMode           string `envconfig:"PLUGIN_OPERATION_MODE" default:"veracode"`
 	AppName                 string `envconfig:"PLUGIN_APPLICATION_NAME"`
 	Criticality             string `envconfig:"PLUGIN_CRITICALITY"`
 	SandboxName             string `envconfig:"PLUGIN_SANDBOX_NAME"`
@@ -45,10 +45,11 @@ type Args struct {
 	UseProxy                bool   `envconfig:"PLUGIN_USE_PROXY"`
 	Version                 string `envconfig:"PLUGIN_VERSION"`
 	Level                   string `envconfig:"PLUGIN_LEVEL"`
+	Workspace               string `envconfig:"PLUGIN_WORKSPACE"`
 
 	// Resubmit-specific
 	AnalysisName          string `envconfig:"PLUGIN_ANALYSIS_NAME"`
-	MaximumDuration       int    `envconfig:"PLUGIN_MAXIMUM_DURATION" default:"3"`
+	MaximumDuration       int    `envconfig:"PLUGIN_MAXIMUM_DURATION" default:"3"` //In days
 	FailBuildAsScanFailed bool   `envconfig:"PLUGIN_FAIL_BUILD_AS_SCAN_FAILED" default:"false"`
 }
 
@@ -66,12 +67,12 @@ func ValidateInputs(args Args) error {
 }
 
 func Exec(ctx context.Context, args Args) error {
-	switch args.FeatureType {
+	switch args.OperationMode {
 	case VeracodeStaticScan:
 		return runVeracodeStaticScanPlugin(ctx, args)
 	case VeracodeResubmit:
 		return runVeracodeResubmit(args)
 	default:
-		return fmt.Errorf("\n❌ Unknown PLUGIN_FEATURE_TYPE: %s (expected: '%s' or '%s')", args.FeatureType, VeracodeStaticScan, VeracodeResubmit)
+		return fmt.Errorf("\n❌ Unknown PLUGIN_FEATURE_TYPE: %s (expected: '%s' or '%s')", args.OperationMode, VeracodeStaticScan, VeracodeResubmit)
 	}
 }
