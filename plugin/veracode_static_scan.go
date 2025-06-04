@@ -265,7 +265,7 @@ func isScanPublished(ctx context.Context, args Args) (bool, string, error) {
 	cmd := exec.CommandContext(ctx, "java", statusArgs...)
 	output, err := cmd.CombinedOutput()
 	outputStr := string(output)
-	logrus.Infof("🔍 CLI raw output:\n%s", outputStr)
+	logrus.Debugf("🔍 CLI raw output:\n%s", outputStr)
 
 	if err != nil {
 		return false, "", fmt.Errorf("failed to check build info: %w", err)
