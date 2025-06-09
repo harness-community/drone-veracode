@@ -10,8 +10,6 @@ import (
 	"testing"
 )
 
-// ---------- Helper & Mock Logic ----------
-
 // Overrideable execCommandContext
 var execCommandContext = exec.CommandContext
 
@@ -89,7 +87,7 @@ func TestValidateInputs(t *testing.T) {
 func TestResolveUploadFileList(t *testing.T) {
 	os.Setenv("DRONE_WORKSPACE", "../testdata")
 
-	actualRaw, err := resolveUploadFileList("*.go", "*.txt")
+	actualRaw, err := resolveUploadFileList("", "*.go", "*.txt")
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}

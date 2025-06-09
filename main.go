@@ -31,11 +31,6 @@ func main() {
 
 	logrus.Info("Starting Veracode plugin execution\n")
 
-	// Validate user inputs
-	if err := plugin.ValidateInputs(args); err != nil {
-		logrus.Fatalf("\nInput validation failed: %s", err)
-	}
-
 	// Execute the plugin logic
 	if err := plugin.Exec(context.Background(), args); err != nil {
 		logrus.Fatalf("\nPlugin execution failed: %v", err)
