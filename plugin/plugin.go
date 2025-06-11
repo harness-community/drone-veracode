@@ -11,7 +11,7 @@ const (
 
 	VeracodeStaticScan = "veracode"
 	VeracodeResubmit   = "veracode_resubmit"
-	VeracodeReview     = "veracode_dynamic_analysis_review"
+	VeracodeReview     = "veracode_review"
 )
 
 type Args struct {
@@ -51,6 +51,10 @@ type Args struct {
 	AnalysisName          string `envconfig:"PLUGIN_ANALYSIS_NAME"`
 	MaximumDuration       int    `envconfig:"PLUGIN_MAXIMUM_DURATION" default:"3"` //In days
 	FailBuildAsScanFailed bool   `envconfig:"PLUGIN_FAIL_BUILD_AS_SCAN_FAILED" default:"false"`
+
+	//Analysis Review
+	WaitForResultsDuration      int  `envconfig:"PLUGIN_WAIT_FOR_RESULTS_DURATION" default:"60"`
+	FailBuildForPolicyViolation bool `envconfig:"PLUGIN_FAIL_BUILD_FOR_POLICY_VIOLATION" default:"false"`
 }
 
 func ValidateInputs(args Args) error {
@@ -72,6 +76,8 @@ func Exec(ctx context.Context, args Args) error {
 		return runVeracodeStaticScanPlugin(ctx, args)
 	case VeracodeResubmit:
 		return runVeracodeResubmit(args)
+	case VeracodeReview:
+		return runVeracodeDynamicAnalysisReview(ctx, args)
 	default:
 		return fmt.Errorf("\n❌ Unknown PLUGIN_OPERATION_MODE: %s (expected: '%s' or '%s')", args.OperationMode, VeracodeStaticScan, VeracodeResubmit)
 	}
