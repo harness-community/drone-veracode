@@ -101,6 +101,10 @@ docker run --rm \
 
 # Plugin Settings
 
+- `PLUGIN_OPERATION_MODE`
+Description: Defines the mode of operation for the plugin (veracode, resubmit, review, etc.).
+Example: veracode
+
 - `PLUGIN_APPLICATION_NAME`
 Description: Name of the Veracode application to scan.
 Example: My Application
@@ -135,11 +139,11 @@ Example: true
 
 - `PLUGIN_UPLOAD_INCLUDES_PATTERN`
 Description: Comma-separated Ant-style file patterns to include for upload.
-Example: **/*.jar,**/*.war
+Example: /*.jar,/*.war
 
 - `PLUGIN_UPLOAD_EXCLUDES_PATTERN`
 Description: Comma-separated Ant-style file patterns to exclude from upload.
-Example: **/test/**,**/docs/**
+Example: /test/,/docs/
 
 - `PLUGIN_SCAN_INCLUDES_PATTERN`
 Description: Pattern to include specific modules during scan.
@@ -201,10 +205,6 @@ Example: true
 Description: If true, the job will fail if the scan times out.
 Example: true
 
-- `PLUGIN_UNSTABLE_BUILD`
-Description: If true, policy failures mark the build as unstable (exit code 2).
-Example: true
-
 - `PLUGIN_CAN_FAIL_JOB`
 Description: If true, scan failure will fail the job; if false, it only logs warnings.
 Example: true
@@ -220,3 +220,27 @@ Example: v1.0.0-build123
 - `PLUGIN_LEVEL`
 Description: Defines the plugin log level (debug, info, warn, etc.).
 Example: info
+
+- `PLUGIN_WORKSPACE`
+Description: Workspace path where the plugin operates (generally set by CI/CD pipeline).
+Example: /drone/src
+
+- `PLUGIN_ANALYSIS_NAME`
+Description: The name of the Dynamic Analysis to be reviewed or resubmitted.
+Example: my-analysis-01
+
+- `PLUGIN_MAXIMUM_DURATION`
+Description: Maximum duration (in days) to wait before timing out resubmitted scans.
+Example: 3
+
+- `PLUGIN_FAIL_BUILD_AS_SCAN_FAILED`
+Description: If true, fails the build if the scan itself fails.
+Example: false
+
+- `PLUGIN_WAIT_FOR_RESULTS_DURATION`
+Description: Duration in minutes to wait for results of a Dynamic Analysis review.
+Example: 60
+
+- `PLUGIN_FAIL_BUILD_FOR_POLICY_VIOLATION`
+Description: If true, policy violations during review fail the build.
+Example: false
